@@ -1,10 +1,13 @@
+import json
 import os
-from cmd.tools.web_search.schemas import SearchInputSchema, SearchResponseSchema
+from datetime import datetime, timezone
 
 from dotenv import load_dotenv
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
 from tavily import TavilyClient  # for async, use AsyncTavilyClient
+
+from .schemas import SearchInputSchema, SearchResponseSchema
 
 load_dotenv()
 
@@ -35,11 +38,22 @@ def web_search(input: SearchInputSchema) -> SearchResponseSchema:
     return SearchResponseSchema(**raw_response)
 
 
+# TODO: check what LLM is actually returning; may be useful to concatenate output
+# from Tavily instead of using tokens to generate summary; can use the analysis tool
+# separately on the output from Tavily AI search.
 @mcp.tool(
     name="SaveSearchResults",
-    description="Save LLM summary of web search results and relevant links to local storage folder",
+    description="Save your summary of web search results and their source URLs to a JSON file at the given path",
 )
-def save_search_results(dest: str) -> None:
-    # NOTE: the actual results of the web search are not saved; this protects the user
-    # from issues pertaining to scraping.
-    pass
+def save_search_results(
+    dest: str, query: str, summary: str, sources: list[str]
+) -> None:
+    os.makedirs(os.path.dirname(os.path.abspath(dest)), exist_ok=True)
+    payload = {
+        "query": query,
+        "summary": summary,
+        "sources": sources,
+        "saved_at": datetime.now(timezone.utc).isoformat(),
+    }
+    with open(dest, "w") as f:
+        json.dump(payload, f, indent=4)
