@@ -38,22 +38,29 @@ def web_search(input: SearchInputSchema) -> SearchResponseSchema:
     return SearchResponseSchema(**raw_response)
 
 
-# TODO: check what LLM is actually returning; may be useful to concatenate output
-# from Tavily instead of using tokens to generate summary; can use the analysis tool
-# separately on the output from Tavily AI search.
 @mcp.tool(
     name="SaveSearchResults",
-    description="Save your summary of web search results and their source URLs to a JSON file at the given path",
+    description=(
+        "Save the results of a web search to a JSON file at dest. "
+        "Pass the response from WebSearch directly: Tavily's answer, per-source excerpts, "
+        "and image URLs are all saved. The LLM can read this file later to answer questions "
+        "without repeating the search."
+    ),
 )
-def save_search_results(
-    dest: str, query: str, summary: str, sources: list[str]
-) -> None:
+def save_search_results(dest: str, response: SearchResponseSchema) -> str:
     os.makedirs(os.path.dirname(os.path.abspath(dest)), exist_ok=True)
     payload = {
-        "query": query,
-        "summary": summary,
-        "sources": sources,
+        "query": response.query,
+        "answer": response.answer,
+        "results": [r.model_dump() for r in response.results],
+        "images": [
+            i.model_dump()  # type: ignore
+            if hasattr(i, "model_dump")
+            else i
+            for i in response.images
+        ],
         "saved_at": datetime.now(timezone.utc).isoformat(),
     }
     with open(dest, "w") as f:
         json.dump(payload, f, indent=4)
+    return dest

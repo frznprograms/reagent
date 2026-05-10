@@ -96,7 +96,8 @@ func RunTerminalCommand(ctx context.Context, req *mcp.CallToolRequest, input Ter
 		log.Fatalf("LLM attempted to run %s command, was rejected for being unsafe.", input.Command)
 	}
 	log.Printf("LLM intends to run %s ", input.Command)
-	cmd := exec.Command(input.Name, input.Command)
+	tokens := strings.Fields(input.Command)
+	cmd := exec.CommandContext(ctx, tokens[0], tokens[1:]...)
 	output, err := cmd.Output() // capture output
 	if err != nil {
 		fmt.Println("Unable to execute command: ", err)

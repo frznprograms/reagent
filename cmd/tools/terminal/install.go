@@ -1,45 +1,91 @@
 package terminal
 
-// TODO: check how to use the prepared web search tool to integrate with this
-// TODO: check if json schema from web_search.schemas needs to be defined here again
-
 import (
 	"context"
+	"fmt"
+	"log"
+	"os/exec"
+	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // This package performs terminal operations related to installations. Since installations
-// can be dangerous in rare cases, the LLM can be asked to first check online for security
-// updates before performing installations.
+// can be dangerous in rare cases, the agent must run RunInstallSafetyChecks first, which
+// returns a web search query. The orchestrator routes that query to the WebSearch tool.
+// Only after reviewing results should the agent call RunInstallCommand.
 
-// buildInstallMap creates a map of acceptable tools to use for installations. The list
-// of tools is narrow on purpose - agents should not be allowed to run installations through
-// unverified channels.
-func buildInstallMap() map[string]bool {
-	AllowedCommands := []string{"uv", "pip", "conda", "go get"}
-	CommandMap := make(map[string]bool)
-	for _, cmd := range AllowedCommands {
-		CommandMap[cmd] = true
+type InstallInput struct {
+	Packages   []string `json:"packages"`
+	Manager    string   `json:"manager"`
+	Subcommand string   `json:"subcommand"`
+}
+
+type SafetyCheckOutput struct {
+	WebSearchQuery string `json:"webSearchQuery"`
+}
+
+// buildInstallMap returns a map of manager → allowed subcommands. Keeping the list
+// narrow ensures agents can only use verified package managers and safe subcommands.
+func buildInstallMap() map[string]map[string]bool {
+	allowed := map[string][]string{
+		"uv":    {"add", "init", "remove", "sync", "run"},
+		"pip":   {"install", "uninstall", "list", "show"},
+		"conda": {"install", "init", "create", "list"},
+		"go":    {"get"},
 	}
-	return CommandMap
+	result := make(map[string]map[string]bool, len(allowed))
+	for manager, subcmds := range allowed {
+		result[manager] = make(map[string]bool, len(subcmds))
+		for _, s := range subcmds {
+			result[manager][s] = true
+		}
+	}
+	return result
 }
 
-// RunInstallSafetyChecks is used in the installation tool, but calls the web
-// search tool in turn, to ascertain from recent news whether the package(s)
-// the user wishes to install are safe.
-//
-// It is left as its own tool, within the same server so it can be run independently.
-func RunInstallSafetyChecks(ctx context.Context, req *mcp.CallToolRequest, input TerminalInput) (
-	*mcp.CallToolResult, TerminalOutput, error,
+// RunInstallSafetyChecks returns a targeted web search query for the requested packages.
+// The orchestrator should route this query to the WebSearch tool and present results to
+// the agent before allowing RunInstallCommand to proceed.
+func RunInstallSafetyChecks(ctx context.Context, req *mcp.CallToolRequest, input InstallInput) (
+	*mcp.CallToolResult, SafetyCheckOutput, error,
 ) {
+	if len(input.Packages) == 0 {
+		return nil, SafetyCheckOutput{}, fmt.Errorf("no packages specified")
+	}
+	installMap := buildInstallMap()
+	if _, ok := installMap[input.Manager]; !ok {
+		return nil, SafetyCheckOutput{}, fmt.Errorf("package manager %q is not permitted", input.Manager)
+	}
+	joined := strings.Join(input.Packages, ", ")
+	query := fmt.Sprintf(
+		`security vulnerabilities supply chain attack CVE %s 
+		site:nvd.nist.gov OR site:snyk.io OR site:osv.dev OR site:github.com/advisories`,
+		joined,
+	)
+	log.Printf("Install safety check requested for: %s", joined)
+	return nil, SafetyCheckOutput{WebSearchQuery: query}, nil
 }
 
-// RunInstallCommand runs a command provided by the LLM in the terminal, specifically to run
-// installations. For safety, this is left as a separate concern in this codebase. Use of this
-// tool automatically triggers a search into whether the desired packages for installation are
-// safe to use.
-func RunInstallCommand(ctx context.Context, req *mcp.CallToolRequest, input TerminalInput) (
+// RunInstallCommand runs an installation command. The agent must call RunInstallSafetyChecks
+// and review the web search results before invoking this.
+func RunInstallCommand(ctx context.Context, req *mcp.CallToolRequest, input InstallInput) (
 	*mcp.CallToolResult, TerminalOutput, error,
 ) {
+	installMap := buildInstallMap()
+	subcmds, managerOk := installMap[input.Manager]
+	if !managerOk {
+		return nil, TerminalOutput{}, fmt.Errorf("package manager %q is not permitted", input.Manager)
+	}
+	if !subcmds[input.Subcommand] {
+		return nil, TerminalOutput{}, fmt.Errorf("subcommand %q is not permitted for %s", input.Subcommand, input.Manager)
+	}
+
+	args := append([]string{input.Subcommand}, input.Packages...)
+	cmd := exec.CommandContext(ctx, input.Manager, args...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, TerminalOutput{Output: string(output)}, fmt.Errorf("install failed: %w", err)
+	}
+	return nil, TerminalOutput{Output: string(output)}, nil
 }
