@@ -3,7 +3,7 @@ package terminal
 
 import (
 	"context"
-	"go/build"
+	"fmt"
 	"log"
 	"os/exec"
 	"strings"
@@ -12,32 +12,37 @@ import (
 )
 
 type TerminalInput struct {
-	Name string `json:"name"`
-	Command string `json:"command"`
+	Name            string `json:"name"`
+	Command         string `json:"command"`
+	AcceptLongInput bool   `json:"acceptLongInput"`
 }
 
 type TerminalOutput struct {
 	Output string `json:"output"`
 }
 
-const (
-	AllowedCommands = [9]string{"ls", "cat", "echo", "pwd", "grep", "find", "wc", "head", "tail"}
-	ShellOperations = [8]string{"&&", "||", "|", ";", "&", ">", "<", ">>"}
-)
-
-// buildCommandMap builds hash maps that operate more as hash sets for the AllowedCommands
-// and ShellOperations consts. This is purely for convenience of comparing commands at runtime.
-func buildCommandMap() (map[string]bool, map[string]bool){
+// buildCommandMap builds hash maps that operate more as hash sets for the allowed command lists.
+// This is purely for convenience of comparing commands at runtime.
+func buildCommandMap() (map[string]bool, map[string]bool, map[string]bool) {
+	var (
+		AllowedCommands   = [11]string{"ls", "cat", "echo", "pwd", "grep", "find", "wc", "head", "tail", "pytest", "make"}
+		AllowedGitSubcmds = [5]string{"status", "log", "diff", "show", "branch"}
+		ShellOperations   = [8]string{"&&", "||", "|", ";", "&", ">", "<", ">>"}
+	)
 	CommandMap := make(map[string]bool)
 	for _, cmd := range AllowedCommands {
 		CommandMap[cmd] = true
 	}
+	GitMap := make(map[string]bool)
+	for _, sub := range AllowedGitSubcmds {
+		GitMap[sub] = true
+	}
 	ShellMap := make(map[string]bool)
-	for _, cmd := ShellOperations {
-		ShellMap[cmd] = true
+	for _, op := range ShellOperations {
+		ShellMap[op] = true
 	}
 
-	return CommandMap, ShellMap
+	return CommandMap, GitMap, ShellMap
 }
 
 // verifyCommand checks the command signature the LLM wishes to run. LLMs are constrained to
@@ -49,9 +54,17 @@ func verifyCommand(command string) bool {
 		log.Println("LLM attempted to run an empty command. This is harmless, but unhelpful.")
 		return true
 	}
-	commandMap, shellMap := buildCommandMap()
+	commandMap, gitMap, shellMap := buildCommandMap()
 	executable := strings.TrimSpace(tokens[0])
-	// reject commands other than those which are pre-approved
+
+	if executable == "git" {
+		if len(tokens) < 2 {
+			return false
+		}
+		_, ok := gitMap[tokens[1]]
+		return ok
+	}
+
 	_, ok := commandMap[executable]
 	if !ok {
 		return false
@@ -74,13 +87,13 @@ func verifyCommand(command string) bool {
 // RunTerminalCommand runs a command provided by the LLM in the terminal. It always checks for
 // the safety of the command first. Timeouts will be handled by ctx in main.
 // Output is truncated to 7000 chars, to ensure the LLM receives meaningful context without
-// being excessive.
+// being excessive. This can be overriden via input.AcceptLongInput.
 func RunTerminalCommand(ctx context.Context, req *mcp.CallToolRequest, input TerminalInput) (
 	*mcp.CallToolResult, TerminalOutput, error,
 ) {
 	isCommandSafe := verifyCommand(input.Command)
 	if !isCommandSafe {
-		log.Fatal("LLM attempted to run %s command, was rejected for being unsafe.", input.Command)
+		log.Fatalf("LLM attempted to run %s command, was rejected for being unsafe.", input.Command)
 	}
 	log.Printf("LLM intends to run %s ", input.Command)
 	cmd := exec.Command(input.Name, input.Command)
@@ -88,5 +101,10 @@ func RunTerminalCommand(ctx context.Context, req *mcp.CallToolRequest, input Ter
 	if err != nil {
 		fmt.Println("Unable to execute command: ", err)
 	}
-	return nil, TerminalOutput{Output: string(output[:7000])}, nil
+	s := string(output)
+	runes := []rune(s)
+	if len(runes) > 7000 && !input.AcceptLongInput {
+		s = string(runes[:7000])
+	}
+	return nil, TerminalOutput{Output: s}, nil
 }
