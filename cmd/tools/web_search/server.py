@@ -38,6 +38,9 @@ def web_search(input: SearchInputSchema) -> SearchResponseSchema:
     return SearchResponseSchema(**raw_response)
 
 
+# FIXME: refactor this tool; the inputs to tools should only be things that a model
+# can generate on its own, not the input from previous steps. It should be changed
+# to all happen in a single tool call, with the option to save the output.
 @mcp.tool(
     name="SaveSearchResults",
     description=(
