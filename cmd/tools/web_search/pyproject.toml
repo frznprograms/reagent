@@ -1,0 +1,12 @@
+[project]
+name = "web-search"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "dotenv>=0.9.9",
+    "fastmcp>=3.2.4",
+    "pydantic>=2.13.4",
+    "tavily-python>=0.7.24",
+]
