@@ -1,4 +1,4 @@
-module research-agent
+module reagent
 
 go 1.26.2
 

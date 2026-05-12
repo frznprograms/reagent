@@ -107,6 +107,7 @@ func RunTerminalCommand(
 	}
 
 	s := string(output)
+	// FIXME: this should only be used if the command is cat
 	if !input.AcceptLongInput && len([]rune(s)) > 7000 {
 		s = string([]rune(s)[:7000])
 	}
