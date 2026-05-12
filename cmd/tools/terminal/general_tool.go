@@ -97,7 +97,7 @@ func RunTerminalCommand(
 		return nil, TerminalOutput{}, fmt.Errorf("command rejected: %q is not on the allowlist", input.Command)
 	}
 
-	log.Printf("Running command: %s", input.Command)
+	// log.Printf("Running command: %s", input.Command)
 
 	tokens := strings.Fields(input.Command)
 	cmd := exec.CommandContext(ctx, tokens[0], tokens[1:]...)
@@ -107,7 +107,7 @@ func RunTerminalCommand(
 	}
 
 	s := string(output)
-	// FIXME: this should only be used if the command is cat
+	// NOTE: LLM decides if AcceptLongInput is set to true
 	if !input.AcceptLongInput && len([]rune(s)) > 7000 {
 		s = string([]rune(s)[:7000])
 	}
