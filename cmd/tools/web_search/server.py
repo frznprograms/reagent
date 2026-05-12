@@ -25,9 +25,13 @@ def init_search_client():
 
 @mcp.tool(
     name="WebSearch",
-    description="Search the web; obtain relevant results for a given query",
+    description=(
+        "Search the web; obtain relevant results for a given query.",
+        "If a destination ('dest') key is set, then the results should be saved to it.",
+        "If not, the default behaviour is to return the search results to the LLM.",
+    ),
 )
-def web_search(input: SearchInputSchema) -> SearchResponseSchema:
+def web_search(input: SearchInputSchema) -> str:
     client = init_search_client()
     kwargs = input.model_dump(exclude_none=True)
     query = kwargs.pop("query")
@@ -35,35 +39,31 @@ def web_search(input: SearchInputSchema) -> SearchResponseSchema:
         raise ToolError("A valid query must be provided.")
 
     raw_response = client.search(query=query, **kwargs)
-    return SearchResponseSchema(**raw_response)
+    response = SearchResponseSchema(**raw_response)
 
+    dest = kwargs.pop("dest")
+    if dest:
+        os.makedirs(os.path.dirname(os.path.abspath(dest)), exist_ok=True)
+        payload = {
+            "query": response.query,
+            "answer": response.answer,
+            "results": [r.model_dump() for r in response.results],
+            "images": [
+                i.model_dump()  # type: ignore
+                if hasattr(i, "model_dump")
+                else i
+                for i in response.images
+            ],
+            "saved_at": datetime.now(timezone.utc).isoformat(),
+        }
+        with open(dest, "w") as f:
+            json.dump(payload, f, indent=4)
+        return dest
 
-# FIXME: refactor this tool; the inputs to tools should only be things that a model
-# can generate on its own, not the input from previous steps. It should be changed
-# to all happen in a single tool call, with the option to save the output.
-@mcp.tool(
-    name="SaveSearchResults",
-    description=(
-        "Save the results of a web search to a JSON file at dest. "
-        "Pass the response from WebSearch directly: Tavily's answer, per-source excerpts, "
-        "and image URLs are all saved. The LLM can read this file later to answer questions "
-        "without repeating the search."
-    ),
-)
-def save_search_results(dest: str, response: SearchResponseSchema) -> str:
-    os.makedirs(os.path.dirname(os.path.abspath(dest)), exist_ok=True)
-    payload = {
-        "query": response.query,
-        "answer": response.answer,
-        "results": [r.model_dump() for r in response.results],
-        "images": [
-            i.model_dump()  # type: ignore
-            if hasattr(i, "model_dump")
-            else i
-            for i in response.images
-        ],
-        "saved_at": datetime.now(timezone.utc).isoformat(),
-    }
-    with open(dest, "w") as f:
-        json.dump(payload, f, indent=4)
-    return dest
+    return json.dumps(
+        {
+            "query": response.query,
+            "answer": response.answer,
+            "results": [r.model_dump() for r in response.results],
+        }
+    )

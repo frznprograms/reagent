@@ -1,24 +1,48 @@
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
 
 class SearchInputSchema(BaseModel):
-    query: str
-    search_depth: str = "advanced"  # for research
-    topic: str = "general"
-    start_date: Optional[str] = None  # YYYY-MM-DD
-    end_date: Optional[str] = None  # YYYY-MM-DD
-    max_results: int = 10  # 0–20
-    include_images: bool = True
-    include_image_descriptions: bool = True  # fixed typo: was "inlcude_"
-    include_answer: bool = True
-    include_domains: list[str] = Field(default_factory=list)
-    exclude_domains: list[str] = Field(default_factory=list)
-    country: Optional[str] = None
-    timeout: float = 60.0
-    include_usage: bool = True
-    exact_match: bool = False
+    query: str = Field(description="The search query to run.")
+    dest: str | None = Field(
+        default=None,
+        description="Optional file path to save results as JSON. If omitted, results are returned directly.",
+    )
+    search_depth: Literal["basic", "advanced"] | None = Field(
+        default=None,
+        description="'basic' is faster; 'advanced' is slower but more thorough.",
+    )
+    topic: Literal["general", "news", "finance"] | None = Field(
+        default=None,
+        description="'general' for broad searches, 'news' for recent events, 'finance' for market data.",
+    )
+    time_range: Literal["day", "week", "month", "year"] | None = Field(
+        default=None, description="Filter results by recency."
+    )
+    max_results: int | None = Field(
+        default=None, description="Number of results to return, typically 1-10."
+    )
+    include_images: bool = Field(
+        default=True,
+        description="If true, image URLs relevant to the query are included.",
+    )
+    include_answer: bool = Field(
+        default=True,
+        description="If true, Tavily returns a synthesised answer string above the results.",
+    )
+    include_domains: list[str] = Field(
+        default_factory=list,
+        description="Restrict results to these domains e.g. ['github.com', 'docs.python.org'].",
+    )
+    exclude_domains: list[str] = Field(
+        default_factory=list, description="Block results from these domains."
+    )
+    country: str | None = Field(
+        default=None,
+        description="Bias results toward a specific country code e.g. 'us', 'gb'.",
+    )
+    timeout: float = Field(default=60.0, description="Request timeout in seconds.")
 
 
 class ImageResult(BaseModel):
