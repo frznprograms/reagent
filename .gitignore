@@ -6,3 +6,10 @@
 
 # personal docs
 notes/
+
+# macos rubbish
+*.DS_Store
+
+# to be removed from this file later
+assets/
+*.md
