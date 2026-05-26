@@ -86,12 +86,14 @@ func extractText(content []mcp.Content) string {
 }
 
 // toolsInputSchema extracts a plain map[string]any from the MCP tool's
-// InputSchema so that ollama.Tool can embed it. MCP stores the schema
-// as json.RawMessage, so it is unmarshaled once here.
-func toolsInputSchema(t *mcp.Tool) ollama.ToolFunctionParams {
-	params := ollama.ToolFunctionParams{
+// InputSchema so that ollama.Tool can embed it, as Ollama and MCP expect different
+// formats for the input schema. MCP stores the schema as json.RawMessage, so it is
+// unmarshaled once here.
+func toolsInputSchema(t *mcp.Tool) ollama.ToolFunctionParameters {
+	// take single MCP tool and return an Ollama parameter struct
+	params := ollama.ToolFunctionParameters{
 		Type:       "object",
-		Properties: map[string]ollama.ToolFunctionParamProperties{},
+		Properties: ollama.NewToolPropertiesMap(), // ordered map, populated with Set()
 	}
 	if t.InputSchema == nil {
 		return params
@@ -99,12 +101,12 @@ func toolsInputSchema(t *mcp.Tool) ollama.ToolFunctionParams {
 
 	// unmarshal raw JSON schema into a generic map so the 'properties'
 	// and 'required' fields can be read without importing a schema library
+	// default is empty result to return if anything goes wrong or if tool takes no inputs
 	var raw struct {
 		Properties map[string]json.RawMessage `json:"properties"`
 		Required   []string                   `json:"required"`
 	}
-	// FIXME: t.InputSchema can't be converted to bytes array
-	if err := json.Unmarshal(t.InputSchema, &raw); err != nil {
+	if err := json.Unmarshal(t.InputSchema.([]byte), &raw); err != nil {
 		return params
 	}
 
@@ -116,19 +118,24 @@ func toolsInputSchema(t *mcp.Tool) ollama.ToolFunctionParams {
 		if err := json.Unmarshal(propRaw, &prop); err != nil {
 			continue
 		}
-		params.Properties[name] = ollama.ToolFunctionParamProperties{
-			Type:        prop.Type,
+		// write properties using Set as ollama creates an ordered map
+		params.Properties.Set(name, ollama.ToolProperty{
+			Type:        ollama.PropertyType{prop.Type},
 			Description: prop.Description,
-		}
+		})
 	}
 	params.Required = raw.Required
 
 	return params
 }
 
+// Wrapper function for convenience.
 // ConnectToServer spawns the given command as an MCP subprocess, performs the MCP handshake,
 // and discovers the server's tools. The caller owns the returned *ServerConn and must call
 // Close() when done.
+// Does 3 things in one call: create MCP client, calls Connect(), then immediately calls
+// discoverTools() to cache tool list. Returns a ready-to-use *ServerConn rather than a raw
+// session.
 func ConnectToServer(ctx context.Context, name string, cmd *exec.Cmd) (*ServerConn, error) {
 	client := mcp.NewClient(
 		&mcp.Implementation{Name: "reagent", Version: "v0.1.0"},

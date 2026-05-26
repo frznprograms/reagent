@@ -63,6 +63,8 @@ func (l *LLM) Chat(
 	}
 
 	var reply ollama.Message
+	// NOTE: func is callback function, called many times as token arrive if streaming
+	// is turned on; called exactly once with the complete msg when streaming is turned off
 	err := l.client.Chat(ctx, req, func(resp ollama.ChatResponse) error {
 		reply = resp.Message
 		return nil

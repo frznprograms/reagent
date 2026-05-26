@@ -126,12 +126,13 @@ func RunInstallCommand(
 ) (*mcp.CallToolResult, InstallOutput, error) {
 	tokenMu.Lock()
 	entry, ok := tokenStore[input.Token]
-	delete(tokenStore, input.Token) // single-use: consumed on first call
-	tokenMu.Unlock()
-
 	if !ok {
 		return nil, InstallOutput{}, fmt.Errorf("missing or invalid safety check token — run RunInstallSafetyChecks first")
 	}
+
+	delete(tokenStore, input.Token) // single-use: consumed on first call
+	tokenMu.Unlock()
+
 	if time.Now().After(entry.expiresAt) {
 		return nil, InstallOutput{}, fmt.Errorf("safety check token expired — run RunInstallSafetyChecks again")
 	}

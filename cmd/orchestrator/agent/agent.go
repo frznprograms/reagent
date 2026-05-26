@@ -13,7 +13,7 @@ const (
 	// maxTurns limits the agent loop to prevent runaway tool chains.
 	// TODO: 20 may be too low
 	maxTurns     = 20
-	systemPrompt = `You are a reserch agent. You have access to tools for searching th web
+	systemPrompt = `You are a reserch agent. You have access to tools for searching the web
 	and running safe terminal commands. Use them to answer the user's questions as thoroughly
 	and accurately as possible. When you have enough information to give a complete answer,
 	stop calling tools and respond directly to the user.`
@@ -66,6 +66,8 @@ func New(llm *LLM, servers []*ServerConn) *Agent {
 // 2. If the model returns tool calls, dispatch each one via the owning MCP server and append results to history
 // 3. Repeat until model replies with content and no tool calls, or until maxTurns is hit
 func (a *Agent) Run(ctx context.Context, userQuery string) (string, error) {
+	// NOTE: messages is stateless; change in future
+	// NOTE: due to statelessness, conversation is NOT MULTI-TURN
 	messages := []ollama.Message{
 		{Role: "system", Content: systemPrompt},
 		{Role: "user", Content: userQuery},
@@ -78,6 +80,8 @@ func (a *Agent) Run(ctx context.Context, userQuery string) (string, error) {
 		}
 
 		// always append assistant turn so history stays consistent
+		// since every call to Chat is stateless; so model will get a record
+		// of having asked for the tools it asked for in the next turn
 		messages = append(messages, reply)
 
 		// no tool calls means model is done; return its text
@@ -108,17 +112,17 @@ func (a *Agent) Run(ctx context.Context, userQuery string) (string, error) {
 // the text result (or an error string if the call itself failed).
 func (a *Agent) dispatch(ctx context.Context, call ollama.ToolCall) (string, error) {
 	name := call.Function.Name
-	srv, ok := a.toolIndex[name]
+	srv, ok := a.toolIndex[name] // get correct mcp server
 	if !ok {
 		msg := fmt.Sprintf("no server registered for tool %q", name)
-		return msg, fmt.Errorf(msg)
+		return msg, fmt.Errorf("no server registerd for tool %q", name)
 	}
 
 	// Ollama gives us arguments as a map[string]any already parsed from JSON.
 	args, err := toStringAnyMap(call.Function.Arguments)
 	if err != nil {
 		msg := fmt.Sprintf("could not parse arguments for %q: %v", name, err)
-		return msg, fmt.Errorf(msg)
+		return msg, fmt.Errorf("could not parse arguments for %q, %v", name, err)
 	}
 
 	log.Printf("[agent] calling tool %q on server %q with args %v", name, srv.Name, args)
@@ -130,9 +134,10 @@ func (a *Agent) dispatch(ctx context.Context, call ollama.ToolCall) (string, err
 	return text, nil
 }
 
-// toStringAnyMap normalises the tool call arguments into map[string]any.
-// Ollama's ToolCallFunction.Arguments is already typed as map[string]any,
-// but the field is an any internally, so we round-trip through JSON to be safe.
+// toStringAnyMap normalises the tool call arguments into map[string]any, because
+// there is a type mismatch between what Ollama returns and what MCP .Call() expects:
+// Ollama returns arguments as ToolCallFunctionArguments, ServerConn.Call expects a
+// plain map[string]any.
 func toStringAnyMap(v any) (map[string]any, error) {
 	if m, ok := v.(map[string]any); ok {
 		return m, nil
